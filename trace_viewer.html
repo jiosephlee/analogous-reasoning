@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trace Viewer</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.4;
+    }
+    body {
+      margin: 0;
+      background: Canvas;
+      color: CanvasText;
+    }
+    header {
+      padding: 18px 22px 12px;
+      border-bottom: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 20px;
+      font-weight: 650;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+      min-height: calc(100vh - 82px);
+    }
+    aside {
+      border-right: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+      padding: 14px;
+      overflow: auto;
+    }
+    section {
+      padding: 16px;
+      overflow: auto;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 650;
+      margin: 12px 0 4px;
+    }
+    input, select, textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+      border-radius: 6px;
+      background: Canvas;
+      color: CanvasText;
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    button {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+      border-radius: 6px;
+      background: ButtonFace;
+      color: ButtonText;
+      cursor: pointer;
+    }
+    .stats {
+      margin: 10px 0;
+      font-size: 12px;
+      opacity: 0.75;
+    }
+    .list {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .item {
+      text-align: left;
+      border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+      border-radius: 8px;
+      padding: 10px;
+      background: color-mix(in srgb, CanvasText 3%, transparent);
+    }
+    .item.active {
+      outline: 2px solid Highlight;
+    }
+    .meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      opacity: 0.8;
+    }
+    .pill {
+      border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+      border-radius: 999px;
+      padding: 2px 7px;
+    }
+    .ok { color: #16823a; }
+    .bad { color: #c0362c; }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+      border-radius: 8px;
+      padding: 12px;
+      background: color-mix(in srgb, CanvasText 4%, transparent);
+      font-size: 12px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid color-mix(in srgb, CanvasText 18%, transparent); }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Trace Viewer</h1>
+    <input id="file" type="file" accept=".jsonl,.json" multiple>
+  </header>
+  <main>
+    <aside>
+      <label for="paste">Paste JSONL</label>
+      <textarea id="paste" placeholder="Paste traces.jsonl content here"></textarea>
+      <button id="loadPaste">Load pasted traces</button>
+      <label for="task">Task</label>
+      <select id="task"><option value="">All</option></select>
+      <label for="method">Method</label>
+      <select id="method"><option value="">All</option></select>
+      <label for="correct">Correctness</label>
+      <select id="correct">
+        <option value="">All</option>
+        <option value="true">Correct</option>
+        <option value="false">Incorrect</option>
+        <option value="error">Error</option>
+      </select>
+      <label for="query">Search</label>
+      <input id="query" placeholder="example id, SMILES, text">
+      <div class="stats" id="stats">No traces loaded.</div>
+      <div class="list" id="list"></div>
+    </aside>
+    <section>
+      <div id="detail">Load a trace file to begin.</div>
+    </section>
+  </main>
+  <script>
+    let traces = [];
+    let filtered = [];
+    let selected = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    function parseLines(text) {
+      return text.split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => JSON.parse(line));
+    }
+
+    function methodOf(t) {
+      return `${t.prompt_variant || ""}__${t.tool_mode || ""}`;
+    }
+
+    function refreshOptions() {
+      const tasks = [...new Set(traces.map(t => t.task).filter(Boolean))].sort();
+      const methods = [...new Set(traces.map(methodOf).filter(Boolean))].sort();
+      $("task").innerHTML = '<option value="">All</option>' + tasks.map(t => `<option>${escapeHtml(t)}</option>`).join("");
+      $("method").innerHTML = '<option value="">All</option>' + methods.map(m => `<option>${escapeHtml(m)}</option>`).join("");
+    }
+
+    function applyFilters() {
+      const task = $("task").value;
+      const method = $("method").value;
+      const correctness = $("correct").value;
+      const query = $("query").value.toLowerCase();
+      filtered = traces.filter(t => {
+        if (task && t.task !== task) return false;
+        if (method && methodOf(t) !== method) return false;
+        if (correctness === "true" && t.correct !== true) return false;
+        if (correctness === "false" && t.correct !== false) return false;
+        if (correctness === "error" && !t.failure && !t.error) return false;
+        if (query) {
+          const haystack = JSON.stringify({
+            id: t.example_id,
+            smiles: t.smiles,
+            assistant: t.assistant_text,
+            failure: t.failure,
+          }).toLowerCase();
+          if (!haystack.includes(query)) return false;
+        }
+        return true;
+      });
+      $("stats").textContent = `${filtered.length} / ${traces.length} traces`;
+      renderList();
+      if (!selected && filtered.length) showDetail(filtered[0]);
+    }
+
+    function renderList() {
+      $("list").innerHTML = filtered.slice(0, 500).map((t, idx) => {
+        const cls = selected === t ? "item active" : "item";
+        const ok = t.correct === true ? "ok" : "bad";
+        const status = t.failure ? "error" : (t.correct === true ? "correct" : "incorrect");
+        return `<button class="${cls}" data-idx="${idx}">
+          <strong>${escapeHtml(t.example_id || "")}</strong>
+          <div class="meta">
+            <span class="pill">${escapeHtml(methodOf(t))}</span>
+            <span class="pill">${escapeHtml(t.task || "")}</span>
+            <span class="pill ${ok}">${status}</span>
+          </div>
+        </button>`;
+      }).join("");
+      [...$("list").querySelectorAll("button")].forEach(btn => {
+        btn.addEventListener("click", () => showDetail(filtered[Number(btn.dataset.idx)]));
+      });
+    }
+
+    function showDetail(t) {
+      selected = t;
+      renderList();
+      const messages = t.messages || [];
+      const toolEvents = t.tool_events || [];
+      $("detail").innerHTML = `
+        <h2>${escapeHtml(t.example_id || "")}</h2>
+        <div class="meta">
+          <span class="pill">${escapeHtml(methodOf(t))}</span>
+          <span class="pill">${escapeHtml(t.task || "")}</span>
+          <span class="pill">label=${escapeHtml(String(t.label))}</span>
+          <span class="pill">prediction=${escapeHtml(String(t.prediction))}</span>
+          <span class="pill">${t.correct ? "correct" : "incorrect"}</span>
+        </div>
+        <div class="grid">
+          <div><h3>Messages</h3><pre>${escapeHtml(JSON.stringify(messages, null, 2))}</pre></div>
+          <div><h3>Tool Events</h3><pre>${escapeHtml(JSON.stringify(toolEvents, null, 2))}</pre></div>
+        </div>
+        <h3>Assistant</h3><pre>${escapeHtml(t.assistant_text || "")}</pre>
+        <h3>Failure</h3><pre>${escapeHtml(JSON.stringify(t.failure || t.error || null, null, 2))}</pre>
+        <h3>Raw Trace</h3><pre>${escapeHtml(JSON.stringify(t, null, 2))}</pre>`;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[ch]);
+    }
+
+    async function loadFiles(files) {
+      const loaded = [];
+      for (const file of files) {
+        const text = await file.text();
+        if (file.name.endsWith(".json")) {
+          const parsed = JSON.parse(text);
+          loaded.push(...(Array.isArray(parsed) ? parsed : [parsed]));
+        } else {
+          loaded.push(...parseLines(text));
+        }
+      }
+      traces = loaded;
+      selected = null;
+      refreshOptions();
+      applyFilters();
+    }
+
+    $("file").addEventListener("change", (e) => loadFiles(e.target.files));
+    $("loadPaste").addEventListener("click", () => {
+      traces = parseLines($("paste").value);
+      selected = null;
+      refreshOptions();
+      applyFilters();
+    });
+    ["task", "method", "correct", "query"].forEach(id => $(id).addEventListener("input", applyFilters));
+  </script>
+</body>
+</html>

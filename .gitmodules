@@ -1,0 +1,3 @@
+[submodule "therapeutic-tools"]
+	path = therapeutic-tools
+	url = git@github.com:jiosephlee/therapeutic-tools.git

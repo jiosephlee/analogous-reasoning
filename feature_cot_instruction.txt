@@ -1,0 +1,8 @@
+Think through the molecule's features before choosing a label.
+
+Focus on the molecular structure, physicochemical profile, functional groups,
+ring systems, ionization or solubility evidence when available, and structural
+alert evidence when available. Weigh evidence that supports label (A) against
+evidence that supports label (B), then commit to one answer.
+
+Put the final choice after "Answer:" as either "(A)" or "(B)".

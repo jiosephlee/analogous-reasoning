@@ -3,6 +3,11 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Local evaluation artifacts
+conda_env/
+results/
+data/templated/
+
 # C extensions
 *.so
 
